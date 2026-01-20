@@ -1,0 +1,11 @@
+{
+  "_comment": "List of DSL ops with parameter schema definitions.",
+  "ops": [
+    {
+      "op": "MOVE_NAV",
+      "args": {
+        "schema": {}
+      }
+    }
+  ]
+}

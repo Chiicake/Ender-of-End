@@ -16,11 +16,12 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - `src/common/enums/done_evidence.json`（完成证据）
 
 ### 视频片段
-- **recent_clip**：8 帧（4 秒），`[t..t+7]`，2FPS。
-- **summary_clip**：60 秒过去帧，每 2 秒采 1 帧（约 30 帧）。
-- **lookahead_clip**: 60 秒未来帧，每 2 秒采 1 帧（约 30 帧）。
+- **recent_clip**：`[t-7..t]`（8 帧，4 秒）
+- **summary_clip**：`[t-60s..t]` 每 2 秒采 1 帧（约 30 帧）
+- **lookahead_clip**：`[t..t+7]`（8 帧，4 秒）
+- **lookahead_summary_clip**：`[t..t+60s]` 每 2 秒采 1 帧（约 30 帧，仅标注用）
 > 采用 base64（JPEG）传输帧。
-> `lookahead_clip` 仅用于标注判断，不进入训练输入。
+> `lookahead_clip` 与 `lookahead_summary_clip` 仅用于标注判断，不进入训练输入。
 
 ## 输出（JSON-only）
 ```json
@@ -50,16 +51,17 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - 你是游戏自动化数据标注助手。
 - 只输出 JSON，严格符合 schema，不得输出解释文字。
 - short_goal 必须在 1–10 秒内可执行。
-- `lookahead_clip` 仅用于判断 next_mid_step_text / horizon_steps / done_evidence，不用于生成 short_goal_dsl。
+- `lookahead_clip` 与 `lookahead_summary_clip` 仅用于判断 next_mid_step / horizon_steps / done_evidence，不用于生成 short_goal_dsl。
 - 任务说明：
-  - 输入包含：`mid_step_text`（当前步骤的描述枚举）、`recent_clip`（当前到过去 4 秒）、`summary_clip`（过去 60 秒摘要）、`lookahead_clip`（未来 60 秒摘要，仅标注用）、`constraints`、以及枚举表。
+  - 输入包含：`mid_step_id/mid_step_text`（当前步骤）、`recent_clip`（当前到过去 4 秒）、`summary_clip`（过去 60 秒摘要）、`lookahead_clip`（未来 4 秒）、`lookahead_summary_clip`（未来 60 秒摘要，仅标注用）、`constraints`、以及枚举表。
   - 输出字段含义：
-    - `next_mid_step_text`：若当前步骤完成则输出下一步文本，否则保持当前步骤文本（必须来自枚举）。
+    - `next_mid_step`：若当前步骤完成则输出下一步枚举项，否则保持当前步骤枚举项。
     - `short_goal_dsl`：短期可执行目标，操作符与参数必须来自 `dsl_ops_enum`。
     - `horizon_steps`：short_goal 预计持续的步数（单位=帧，2FPS，1 step=0.5s）。
     - `done_evidence`：完成证据列表，必须来自 `done_evidence_enum`。
     - `fallback_if_failed`：失败回退动作列表，必须来自枚举。
     - `uncertainty`：标注置信度（low/mid/high）。
+    - `thought`：对当前执行策略的简短说明。
 
 **User**
 - mid_step_id / mid_step_text
@@ -67,6 +69,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - recent_clip
 - summary_clip
 - lookahead_clip（仅标注用）
+- lookahead_summary_clip（仅标注用）
 - dsl_ops_enum / done_evidence_enum
 - prev_thought（来自上一步的thought）
 
@@ -81,6 +84,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
       "recent_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
       "summary_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
       "lookahead_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
+      "lookahead_summary_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
       "constraints": []
     }
   ]
