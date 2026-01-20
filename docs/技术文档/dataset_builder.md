@@ -19,12 +19,6 @@ Dataset Builder 负责把采集的 2FPS 视频与 action string 转换为可复�
 - **summary_clip（Planner 专用）**：60 秒历史，每 2 秒采 1 帧（约 30 帧）。
 - **边界**：只在同一 `mid_step` 内采样，不跨界。
 
-## Labeler 接口（HTTP）
-拆分为两个 Labeler：
-- **Planner Labeler**：输入 `recent_clip + summary_clip + mid_step_id/text (+ constraints)`。
-- **Controller Labeler**：输入 `recent_clip + mid_step_id/text (+ constraints)`。
-Labeler 只负责输出 `plan_json` 核心字段，`plan_id` 与 `schema_version` 由 Dataset Builder 注入。
-
 建议配置：
 - `batch_size=8`（视吞吐调整）
 - `max_retries=3`，指数退避（1s/2s/4s）
@@ -37,7 +31,7 @@ Labeler 只负责输出 `plan_json` 核心字段，`plan_id` 与 `schema_version
 - 记录 `retrieval_policy_version` 与 `retrieval_snapshot`（query/filters/topK 项列表）。
 
 ## Plan Span 对齐（Controller）
-- span 起点：Labeler 给出的 `plan_id` 产生时刻 `t0`。
+- span 起点：Dataset Builder 生成 `plan_id` 的时刻 `t0`。
 - span 截断：`done_evidence` 稳定触发 / need_plan / 强干扰 / horizon 到期。
 - **稳定阈值**：连续 3 帧 + L1/L2 置信度 ≥ 0.8。
 

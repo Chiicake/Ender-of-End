@@ -1,39 +1,41 @@
 # VLM Labeler 技术文档
+src/game_agent_training/VLM_labeler
 
 ## 目标与范围
 VLM Labeler 负责把短视频片段标注为结构化 `plan_json`（含 DSL short_goal），作为 Planner/Controller 的监督信号。当前仅有视频帧与 action 数据，因此 Labeler 的上下文主要来自 **手工维护的 mid_step 枚举** 与视频内容。
 
-## Labeler 划分
-为避免上下文混杂，拆成两个独立 Labeler：
-- **Planner Labeler**：输入 `recent_clip + summary_clip + mid_step`，生成适合规划的 `plan_json`。
-- **Controller Labeler**：输入 `recent_clip + mid_step`，生成稳定、可执行的 `plan_json`（侧重短期执行）。
+所采集到的数据同时供 planner 和 controller 使用。
 
 ## 输入
 ### 通用字段
-- `mid_step_id` / `mid_step_text`：来自手工枚举表（10–30 个），不允许自由发挥。
-- `constraints`（可选）：执行限制与禁用动作说明。
-- `events/state_summary`（可选）：如果离线预跑得到 L1/L2 结果，可附加。
+
+### 枚举来源（动态读取）
+Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
+- `src/common/enums/mid_steps.json`（mid_step_id/text）
+- `src/common/enums/dsl_ops.json`（操作符与参数约束）
+- `src/common/enums/done_evidence.json`（完成证据）
 
 ### 视频片段
-- **recent_clip**：8 帧（4 秒），`[t-7..t]`，2FPS。
-- **summary_clip（Planner 专用）**：60 秒历史，每 2 秒采 1 帧（约 30 帧）。
+- **recent_clip**：8 帧（4 秒），`[t..t+7]`，2FPS。
+- **summary_clip**：60 秒过去帧，每 2 秒采 1 帧（约 30 帧）。
+- **lookahead_clip**: 60 秒未来帧，每 2 秒采 1 帧（约 30 帧）。
+> 采用 base64（JPEG）传输帧。
+> `lookahead_clip` 仅用于标注判断，不进入训练输入。
 
 ## 输出（JSON-only）
-### JSON Schema（关键字段）
 ```json
 {
-  "mid_step_id": "mid_XX",
+  "next_mid_step": "收取基建产出",
   "short_goal_dsl": [{"op": "MOVE_NAV", "args": {"...": "..."}}],
   "horizon_steps": 10,
-  "terminate_on": "done_evidence_or_replan|strict_horizon",
   "done_evidence": ["dialog_open"],
-  "fallback_if_failed": ["recenter_camera"],
-  "uncertainty": "low|mid|high"
+  "uncertainty": "low|mid|high",
+  "thought": "接下来我应该先打开地图，寻找四号谷地，并传送"
 }
 ```
 
 ### 字段约束
-- `mid_step_id`：必须来自手工枚举表。
+- `mid_step` / `next_mid_step`：必须来自手工枚举表。
 - `short_goal_dsl`：仅使用 DSL op 枚举表中的操作。
 - `done_evidence`：仅使用证据枚举表中的条目。
 - `uncertainty`：用于过滤和抽检，`high` 默认剔除。
@@ -41,19 +43,32 @@ VLM Labeler 负责把短视频片段标注为结构化 `plan_json`（含 DSL sho
 ### 自动生成字段
 - `schema_version`：由 Dataset Builder 注入固定值（如 `plan_v1.0`）。
 - `plan_id`：由 Dataset Builder 生成（如 `plan_{episode_id}_{t}`）。
+- 若输出缺失字段，Dataset Builder 按配置注入默认值。
 
-## Prompt 约束（建议）
+## Prompt 约束
 **System**
 - 你是游戏自动化数据标注助手。
 - 只输出 JSON，严格符合 schema，不得输出解释文字。
 - short_goal 必须在 1–10 秒内可执行。
+- `lookahead_clip` 仅用于判断 next_mid_step_text / horizon_steps / done_evidence，不用于生成 short_goal_dsl。
+- 任务说明：
+  - 输入包含：`mid_step_text`（当前步骤的描述枚举）、`recent_clip`（当前到过去 4 秒）、`summary_clip`（过去 60 秒摘要）、`lookahead_clip`（未来 60 秒摘要，仅标注用）、`constraints`、以及枚举表。
+  - 输出字段含义：
+    - `next_mid_step_text`：若当前步骤完成则输出下一步文本，否则保持当前步骤文本（必须来自枚举）。
+    - `short_goal_dsl`：短期可执行目标，操作符与参数必须来自 `dsl_ops_enum`。
+    - `horizon_steps`：short_goal 预计持续的步数（单位=帧，2FPS，1 step=0.5s）。
+    - `done_evidence`：完成证据列表，必须来自 `done_evidence_enum`。
+    - `fallback_if_failed`：失败回退动作列表，必须来自枚举。
+    - `uncertainty`：标注置信度（low/mid/high）。
 
 **User**
 - mid_step_id / mid_step_text
 - constraints
 - recent_clip
-- summary_clip（Planner 专用）
+- summary_clip
+- lookahead_clip（仅标注用）
 - dsl_ops_enum / done_evidence_enum
+- prev_thought（来自上一步的thought）
 
 ## HTTP 接口与批处理
 建议使用批量请求：
@@ -63,8 +78,9 @@ VLM Labeler 负责把短视频片段标注为结构化 `plan_json`（含 DSL sho
     {
       "mid_step_id": "talk_gate_npc",
       "mid_step_text": "...",
-      "recent_clip": ["frame_000123.jpg", "..."],
-      "summary_clip": ["frame_000003.jpg", "..."],
+      "recent_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
+      "summary_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
+      "lookahead_clip": [{"mime": "image/jpeg", "data": "<base64>"}],
       "constraints": []
     }
   ]
