@@ -107,6 +107,54 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - `max_retries=3`，指数退避 1s/2s/4s
 - 缓存键：`clip_hash + goal + labeling_instruct + schema_version`
 
+## 输入/输出示例结构
+### 输入目录（可配置）
+Labeler 从 clip index 读取样本，输入目录可配置：
+```
+<input_dir>/
+  clip_index.jsonl
+  frames/
+    <session_id>/
+      000000.jpg
+      000001.jpg
+```
+`clip_index.jsonl` 内的 `recent_clip/summary_clip/lookahead_clip/lookahead_summary_clip` 为相对路径，基于 `<input_dir>` 解析。
+
+### 输入样本（clip_index.jsonl 片段）
+```json
+{
+  "sample_id": "2026-01-21_10-32-57-527_t000120",
+  "session_id": "2026-01-21_10-32-57-527",
+  "anchor_t": 120,
+  "recent_clip": ["frames/2026-01-21_10-32-57-527/000113.jpg", "..."],
+  "summary_clip": ["frames/2026-01-21_10-32-57-527/000000.jpg", "..."],
+  "lookahead_clip": ["frames/2026-01-21_10-32-57-527/000120.jpg", "..."],
+  "lookahead_summary_clip": ["frames/2026-01-21_10-32-57-527/000120.jpg", "..."],
+  "action_t": "<|action_start|>...<|action_end|>",
+  "goal_t": "<|goal_start|>长期目标/中期目标<|goal_end|>",
+  "instruct_t": "<|labeling_instruct_start|>..<|labeling_instruct_end|>"
+}
+```
+
+### 输出（写回 clip_index.jsonl）
+Labeler 输出写回原 `clip_index.jsonl`，在对应 `sample_id` 行**新增或覆盖**：
+```json
+{
+  "goal": "<|goal_start|>长期目标/中期目标<|goal_end|>",
+  "next_mid_step": "收取基建产出",
+  "short_goal_dsl": [{"op": "MOVE_NAV", "args": {"...": "..."}}],
+  "horizon_steps": 10,
+  "done_evidence": ["dialog_open"],
+  "fallback_if_failed": ["recenter_camera"],
+  "uncertainty": "low|mid|high",
+  "attempt": "对历史总结、当前思考与下一步计划"
+}
+```
+
+## 运行与日志
+- 运行时应打印**完整的进度与对话日志**到控制台（stdout），用于排查标注一致性与模型行为。
+- 每条样本至少输出：`sample_id`、请求耗时、返回的 JSON 摘要与异常信息（若有）。
+
 ## 质量控制
 - 强制 schema 校验与枚举校验，不通过直接剔除。
 - 记录 `uncertainty` 分布与 `next_mid_step` 覆盖率。

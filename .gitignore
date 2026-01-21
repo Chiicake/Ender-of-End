@@ -52,4 +52,7 @@ $RECYCLE.BIN/
 .dockerignore
 *.orig
 coverage/
+
 dataset/
+model/
+memo/
