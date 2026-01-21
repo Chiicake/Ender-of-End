@@ -1,6 +1,0 @@
-{
-  "_comment": "List of fallback actions when a short_goal fails.",
-  "fallback_actions": [
-    "recenter_camera"
-  ]
-}

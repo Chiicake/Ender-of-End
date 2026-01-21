@@ -1,18 +1,37 @@
 # 片段抽取器技术文档
 
 ## 目标与范围
-片段抽取器负责从 **视频 + action string** 中生成用于标注/训练的样本片段，并同时输出：
+片段抽取器负责从 **视频 + action string + goal string + labeling instruct** 中生成用于标注/训练的样本片段，并同时输出：
 - 训练用的索引文件（JSONL）
 - 可抽检/可人工查看的样本文件夹（每样本一目录）
 
 ## 输入
 - **视频**：2FPS（按帧序号读取）
-- **动作**：每 500ms 一行 action string
+- **动作**：每 500ms 一行 action string（推荐 `compiled_actions.jsonl`）
+- （可选）`goal.jsonl`：逐步对齐的目标文本
+- （可选）`labeling_instruct.jsonl`：逐步对齐的标注提示文本
+- （可选）`mid_step` 标注：帧区间标注 `mid_step_id/text`
+
+### 输入示例结构（sessions/）
+```
+sessions/<session_id>/
+  video.mp4
+  actions.jsonl              # 原始输入事件（含 step_index）
+  compiled_actions.jsonl     # action string（与 step_index 对齐）
+  goal.jsonl                 # 目标文本（逐步对齐）
+  labeling_instruct.jsonl    # 标注提示（逐步对齐）
+  meta.json                  # 会话元信息
+  options.json               # 采集配置（fps/step_ms）
+  auto_events.jsonl          # 可选事件（可能为空）
+```
+`compiled_actions.jsonl` 行号对应帧序号（与 `step_index` 对齐）。
+`goal.jsonl` / `labeling_instruct.jsonl` 也按行号与 `step_index` 对齐。
 
 ## 对齐规则
 不做时间戳对齐，直接按序号对齐：
 - 第 i 帧对应第 i 行 action
 - 缺帧/缺行动作直接丢弃该段或整段 episode
+- `compiled_actions.jsonl` / `goal.jsonl` / `labeling_instruct.jsonl` 均按行号与 `step_index` 对齐
 
 ## 片段定义（与 Labeler 对齐）
 以当前时刻 `t` 为锚点：
@@ -36,8 +55,8 @@
   "lookahead_clip": ["frames/000123.jpg", "..."],
   "lookahead_summary_clip": ["frames/000003.jpg", "..."],
   "action_t": "<|action_start|>...<|action_end|>",
-  "mid_step_id": "mid_XX",
-  "mid_step_text": "..."
+  "goal_t": "<|goal_start|>...<|goal_end|>",
+  "instruct_t": "<|labeling_instruct_start|>..<|labeling_instruct_end|>"
 }
 ```
 
@@ -50,6 +69,8 @@ datasets/clips/ep001_t0123/
   lookahead/           # 8 帧（仅标注用）
   lookahead_summary/   # 30 帧（仅标注用）
   action.txt           # anchor 对应的动作行
+  goal.txt             # 可选：目标文本
+  labeling_instruct.txt# 可选：标注提示
   meta.json            # sample_id/anchor_t/mid_step
   label.json           # 标注输出（若已生成）
 ```

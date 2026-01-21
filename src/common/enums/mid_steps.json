@@ -1,9 +1,0 @@
-{
-  "_comment": "List of mid_step entries. Each item should include a stable id and display text.",
-  "mid_steps": [
-    {
-      "mid_step_id": "mid_example",
-      "mid_step_text": "示例步骤"
-    }
-  ]
-}
