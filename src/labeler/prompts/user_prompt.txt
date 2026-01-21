@@ -3,20 +3,24 @@
 - summary_clip（过去 60 秒摘要，{summary_count} 帧）
 - lookahead_clip（未来 4 秒，{lookahead_count} 帧）
 - lookahead_summary_clip（未来 60 秒摘要，{lookahead_summary_count} 帧，仅标注用）
-- goal：以"<|goal_start|>长期目标/中期目标<|goal_end|>"的形式给出（{goal}）
+- goal：以"<|goal_start|>长期目标/中期目标<|goal_end|>"的形式给出（{goal}，允许重写但必须保留格式）
 - labeling_instruct：以"<|labeling_instruct_start|>..<|labeling_instruct_end|>" 给出（{labeling_instruct}）
 
 输出字段含义：
 - goal：修正后的 goal string
-- next_mid_step：若当前步骤完成则输出下一步，否则保持当前步骤
-- short_goal_dsl：短期可执行目标，操作符与参数必须来自 dsl_ops_enum
-- horizon_steps：short_goal 预计持续的步数（单位=帧，2FPS，1 step=0.5s）
-- done_evidence：完成证据列表，必须来自 done_evidence_enum
-- fallback_if_failed：失败回退动作列表，必须来自 fallback_actions_enum
+- next_mid_step：对中期目标拆分后的下一步细化描述
+- short_goal_dsl：短期可执行目标，操作符与参数必须来自 dsl_ops_enum，允许为空列表，最多 1 条
+- horizon_steps：short_goal 预计持续的步数（单位=帧，2FPS，1 step=0.5s，范围 2–20）
+- done_evidence：完成证据列表，必须来自 done_evidence_enum，允许空列表
+- fallback_if_failed：失败回退动作列表，必须来自 fallback_actions_enum，允许空列表
 - uncertainty：标注置信度（low/mid/high）
-- attempt：对历史总结、当前思考以及未来规划
+- attempt：固定结构，包含“历史总结 / 当前思考 / 下一步规划”
+
+输出格式：
+- 必须为 JSON，字段顺序固定：goal, next_mid_step, short_goal_dsl, horizon_steps, done_evidence, fallback_if_failed, uncertainty, attempt
+- 不允许输出解释或拒绝文本
 
 枚举：
-dsl_ops_enum: {dsl_ops_enum}
+dsl_ops_enum: {dsl_ops_enum}（仅提供 op 与 args_keys 的摘要）
 done_evidence_enum: {done_evidence_enum}
 fallback_actions_enum: {fallback_actions_enum}

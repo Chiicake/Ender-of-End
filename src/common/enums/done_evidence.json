@@ -1,6 +1,7 @@
 {
   "_comment": "List of detectable completion evidence tags.",
   "done_evidence": [
-    ""
+    "任务完成",
+    "关卡完成"
   ]
 }

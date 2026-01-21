@@ -16,6 +16,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - `src/common/enums/dsl_ops.json`（操作符与参数约束）
 - `src/common/enums/done_evidence.json`（完成证据）
 - `src/common/enums/fallback_actions.json`（失败回退）
+> 出于性能考虑，`dsl_ops_enum` 在 prompt 中只传 op 与 args_keys 摘要。
 
 ### 视频片段
 - **recent_clip**：`[t-7..t]`（8 帧，4 秒）

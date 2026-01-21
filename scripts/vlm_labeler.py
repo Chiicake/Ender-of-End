@@ -32,6 +32,48 @@ def main() -> int:
         help="HTTP endpoint for the labeler backend.",
     )
     parser.add_argument(
+        "--backend",
+        type=str,
+        default=os.getenv("VLM_LABELER_BACKEND", "openai"),
+        choices=["openai", "ollama"],
+        help="Backend type: openai or ollama.",
+    )
+    parser.add_argument(
+        "--ollama-format",
+        type=str,
+        default=os.getenv("VLM_LABELER_OLLAMA_FORMAT", "json"),
+        help="Ollama response format (e.g., json).",
+    )
+    parser.add_argument(
+        "--ollama-num-predict",
+        type=int,
+        default=None,
+        help="Ollama num_predict override.",
+    )
+    parser.add_argument(
+        "--ollama-fallback-no-format",
+        action="store_true",
+        default=True,
+        help="Retry Ollama once without format when output is empty/invalid.",
+    )
+    parser.add_argument(
+        "--no-ollama-fallback-no-format",
+        action="store_false",
+        dest="ollama_fallback_no_format",
+    )
+    parser.add_argument(
+        "--flush-every-batch",
+        action="store_true",
+        default=True,
+        help="Write clip_index.jsonl after each batch (default: on).",
+    )
+    parser.add_argument(
+        "--no-flush-every-batch",
+        action="store_false",
+        dest="flush_every_batch",
+        help="Only write clip_index.jsonl at the end.",
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
         default=os.getenv("VLM_LABELER_API_KEY"),
@@ -70,6 +112,10 @@ def main() -> int:
     if args.user_prompt_file:
         user_prompt_template = args.user_prompt_file.read_text(encoding="utf-8")
 
+    ollama_format = args.ollama_format
+    if ollama_format is not None and ollama_format.strip().lower() in {"", "none", "null"}:
+        ollama_format = None
+
     config = LabelerConfig(
         input_dir=args.input_dir,
         index_path=args.index_file,
@@ -81,6 +127,11 @@ def main() -> int:
         timeout_sec=args.timeout,
         temperature=args.temperature,
         max_concurrency=args.max_concurrency,
+        backend=args.backend,
+        ollama_format=ollama_format,
+        ollama_num_predict=args.ollama_num_predict,
+        ollama_fallback_no_format=args.ollama_fallback_no_format,
+        flush_every_batch=args.flush_every_batch,
         batch_size=args.batch_size,
         max_retries=args.max_retries,
         retry_backoff_sec=args.retry_backoff,

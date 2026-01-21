@@ -27,8 +27,10 @@ python3 scripts/clip_extractor.py --zip dataset/example/sessions.zip --output ou
 ```bash
 python3 scripts/vlm_labeler.py --input-dir out/ --dry-run --trim-payload
 python3 scripts/vlm_labeler.py --input-dir out/ --base-url http://127.0.0.1:8000/v1 --model gpt-4o-mini
+python3 scripts/vlm_labeler.py --input-dir out/ --backend ollama --base-url http://127.0.0.1:11434/api/chat --model qwen3-vl:4b
+python3 scripts/vlm_labeler.py --input-dir out/ --backend ollama --base-url http://127.0.0.1:11434/api/chat --model qwen3-vl:4b --ollama-format json
 ```
-可选环境变量：`VLM_LABELER_BASE_URL`, `VLM_LABELER_MODEL`, `VLM_LABELER_API_KEY`, `VLM_LABELER_ENDPOINT`
+可选环境变量：`VLM_LABELER_BASE_URL`, `VLM_LABELER_MODEL`, `VLM_LABELER_API_KEY`, `VLM_LABELER_ENDPOINT`, `VLM_LABELER_BACKEND`
 
 ## Build, Test, and Run
 目前未定义构建或测试命令；新增工具后请在此补充。

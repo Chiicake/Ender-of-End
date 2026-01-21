@@ -2,6 +2,7 @@
   "_comment": "List of fallback actions.",
   "done_evidence": [
     "return_to_main",
-    "recenter_camera"
+    "recenter_camera",
+    "wait"
   ]
 }

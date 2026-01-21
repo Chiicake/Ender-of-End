@@ -9,6 +9,8 @@ from __future__ import annotations
 import base64
 import json
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -29,6 +31,11 @@ class LabelerConfig:
     timeout_sec: float = 120.0
     temperature: float = 0.0
     max_concurrency: int = 4
+    backend: str = "openai"
+    ollama_format: str | None = "json"
+    ollama_num_predict: int | None = None
+    ollama_fallback_no_format: bool = True
+    flush_every_batch: bool = True
     batch_size: int = 8
     max_retries: int = 3
     retry_backoff_sec: float = 1.0
@@ -72,6 +79,26 @@ def _load_dsl_ops(path: Path) -> tuple[list[dict[str, Any]], set[str]]:
         if isinstance(entry, dict) and "op" in entry:
             op_names.add(str(entry["op"]))
     return ops, op_names
+
+
+def _summarize_dsl_ops(ops: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary: list[dict[str, Any]] = []
+    for entry in ops:
+        if not isinstance(entry, dict) or "op" not in entry:
+            continue
+        args = entry.get("args") or {}
+        args_keys: list[str] = []
+        if isinstance(args, dict):
+            if isinstance(args.get("schema"), dict):
+                schema = args["schema"]
+                if isinstance(schema.get("properties"), dict):
+                    args_keys = sorted(str(key) for key in schema["properties"].keys())
+                else:
+                    args_keys = sorted(str(key) for key in schema.keys())
+            else:
+                args_keys = sorted(str(key) for key in args.keys())
+        summary.append({"op": str(entry["op"]), "args_keys": args_keys})
+    return summary
 
 
 def _load_enum_list(path: Path, keys: Iterable[str]) -> list[str]:
@@ -255,14 +282,18 @@ def _default_system_prompt() -> str:
     return "\n".join(
         [
             "You are a game automation data labeling assistant.",
-            "Return JSON only; do not include explanations.",
-            "short_goal_dsl must be executable within 1-10 seconds.",
-            "goal may be wrong or empty; correct it using visual evidence.",
-            "lookahead clips are only for judging next_mid_step, horizon_steps, and done_evidence.",
-            "Do not use lookahead clips to invent short_goal_dsl.",
-            "Output fields: goal, next_mid_step, short_goal_dsl, horizon_steps,",
+            "Return JSON only; no explanations or code fences.",
+            "Output fields order must be: goal, next_mid_step, short_goal_dsl, horizon_steps,",
             "done_evidence, fallback_if_failed, uncertainty, attempt.",
-            "uncertainty must be one of: low, mid, high.",
+            "Never refuse to answer; always output a valid JSON.",
+            "goal may be wrong; rewrite it but keep the <|goal_start|>...<|goal_end|> format.",
+            "next_mid_step is a detailed next step for the mid goal, independent of prior steps.",
+            "short_goal_dsl may be empty and must contain at most one op.",
+            "horizon_steps must be 2-20 frames at 2FPS (1-10 seconds).",
+            "done_evidence and fallback_if_failed may be empty lists.",
+            "attempt must include: history summary, current reasoning, next plan.",
+            "dsl_ops_enum is summarized as op + args_keys only.",
+            "Use lookahead clips to improve labeling accuracy.",
         ]
     )
 
@@ -301,13 +332,13 @@ def _build_user_text(
         f"lookahead_summary_clip: {len(item.get('lookahead_summary_clip', []))} frames attached",
         "Field definitions:",
         "goal: <|goal_start|>long_goal/mid_goal<|goal_end|> format.",
-        "next_mid_step: if current step is complete, output the next step; otherwise keep current.",
-        "short_goal_dsl: list of DSL ops with args; ops must come from dsl_ops_enum.",
-        "horizon_steps: number of frames at 2FPS (1 step = 0.5s).",
-        "done_evidence: list from done_evidence_enum.",
-        "fallback_if_failed: list from fallback_actions_enum.",
+        "next_mid_step: detailed next step for the mid goal.",
+        "short_goal_dsl: list of DSL ops with args; at most one op; can be empty.",
+        "horizon_steps: number of frames at 2FPS (1 step = 0.5s), range 2-20.",
+        "done_evidence: list from done_evidence_enum; can be empty.",
+        "fallback_if_failed: list from fallback_actions_enum; can be empty.",
         "uncertainty: low/mid/high.",
-        "attempt: summary of past, current reasoning, and next plan.",
+        "attempt: include history summary, current reasoning, next plan.",
     ]
     if include_enums:
         lines.extend(
@@ -321,6 +352,20 @@ def _build_user_text(
     else:
         lines.append("Enums: omitted")
     return "\n".join(lines)
+
+
+def _augment_user_text_for_ollama(user_text: str, item: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            user_text,
+            "",
+            "Images are attached in this order:",
+            f"recent_clip: {len(item.get('recent_clip', []))} frames (first)",
+            f"summary_clip: {len(item.get('summary_clip', []))} frames",
+            f"lookahead_clip: {len(item.get('lookahead_clip', []))} frames",
+            f"lookahead_summary_clip: {len(item.get('lookahead_summary_clip', []))} frames (last)",
+        ]
+    )
 
 
 def _render_user_prompt(
@@ -451,6 +496,7 @@ def run_labeler(config: LabelerConfig) -> int:
     records = _read_jsonl(index_path)
 
     dsl_ops, dsl_op_names = _load_dsl_ops(config.dsl_ops_path)
+    dsl_ops_summary = _summarize_dsl_ops(dsl_ops)
     done_evidence_enum = _load_enum_list(config.done_evidence_path, ("done_evidence", "evidence"))
     fallback_enum = _load_enum_list(
         config.fallback_actions_path, ("fallback_actions", "fallbacks", "done_evidence")
@@ -465,11 +511,22 @@ def run_labeler(config: LabelerConfig) -> int:
     if config.dry_run:
         print("[info] dry_run enabled; no updates will be written")
     base_url = config.base_url or _normalize_base_url(config.endpoint)
+    use_ollama = (
+        config.backend == "ollama"
+        or (config.base_url or "").rstrip("/").endswith("/api/chat")
+        or (config.endpoint or "").rstrip("/").endswith("/api/chat")
+    )
     if not config.dry_run:
-        if not base_url:
-            raise ValueError("base_url or endpoint is required unless dry_run is set")
-        if not config.model:
-            raise ValueError("model is required unless dry_run is set")
+        if use_ollama:
+            if not (config.base_url or config.endpoint):
+                raise ValueError("base_url or endpoint is required unless dry_run is set")
+            if not config.model:
+                raise ValueError("model is required unless dry_run is set")
+        else:
+            if not base_url:
+                raise ValueError("base_url or endpoint is required unless dry_run is set")
+            if not config.model:
+                raise ValueError("model is required unless dry_run is set")
     prompts_dir = config.prompts_dir or _default_prompts_dir()
     system_prompt_path = config.system_prompt_path or (prompts_dir / "system_prompt.txt")
     user_prompt_path = config.user_prompt_path or (prompts_dir / "user_prompt.txt")
@@ -482,15 +539,19 @@ def run_labeler(config: LabelerConfig) -> int:
     if config.log_requests:
         print(f"[prompt] system={system_prompt}")
     llm = None
+    ollama_endpoint = None
     if not config.dry_run:
-        llm = ChatOpenAI(
-            model=config.model,
-            api_key=config.api_key,
-            base_url=base_url,
-            timeout=config.timeout_sec,
-            temperature=config.temperature,
-            max_retries=0,
-        )
+        if use_ollama:
+            ollama_endpoint = _resolve_ollama_endpoint(config)
+        else:
+            llm = ChatOpenAI(
+                model=config.model,
+                api_key=config.api_key,
+                base_url=base_url,
+                timeout=config.timeout_sec,
+                temperature=config.temperature,
+                max_retries=0,
+            )
 
     updated = 0
     for batch_start in range(0, total, config.batch_size):
@@ -505,34 +566,96 @@ def run_labeler(config: LabelerConfig) -> int:
                 continue
             batch_items.append(item)
             batch_record_map.append(idx)
-            messages_batch.append(
-                _build_messages(item, config, dsl_ops, done_evidence_enum, fallback_enum)
-            )
+            if not use_ollama:
+                messages_batch.append(
+                    _build_messages(item, config, dsl_ops_summary, done_evidence_enum, fallback_enum)
+                )
 
         if not batch_items:
             continue
 
         # if config.log_requests:
-        #     print(f"[request] batch={batch_start // config.batch_size} {_format_payload(batch_items, config.log_full_payload)}")
+        #     print(
+        #         f"[request] batch={batch_start // config.batch_size} "
+        #         f"{_format_payload(batch_items, config.log_full_payload)}"
+        #     )
 
         if config.dry_run:
             continue
 
-        response, duration = _request_with_retries(llm, messages_batch, config)
-
-        if config.log_responses:
-            print(
-                f"[response] batch={batch_start // config.batch_size} "
-                f"{json.dumps([getattr(item, 'content', item) for item in response], ensure_ascii=False)}"
-            )
-
-        items = _extract_items(response)
+        durations: list[float] = []
+        if use_ollama:
+            items: list[Any] = []
+            for item in batch_items:
+                if config.user_prompt_template:
+                    user_text = _render_user_prompt(
+                        config.user_prompt_template,
+                        item,
+                        dsl_ops_summary,
+                        done_evidence_enum,
+                        fallback_enum,
+                        config.include_enums,
+                    )
+                else:
+                    user_text = _build_user_text(
+                        item, dsl_ops_summary, done_evidence_enum, fallback_enum, config.include_enums
+                    )
+                user_text = _augment_user_text_for_ollama(user_text, item)
+                payload = {
+                    "model": config.model,
+                    "stream": False,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {
+                            "role": "user",
+                            "content": user_text,
+                            "images": _flatten_images(item),
+                        },
+                    ],
+                }
+                if config.ollama_format:
+                    payload["format"] = config.ollama_format
+                options: dict[str, Any] = {"temperature": config.temperature}
+                if config.ollama_num_predict is not None:
+                    options["num_predict"] = config.ollama_num_predict
+                if options:
+                    payload["options"] = options
+                response, duration = _ollama_request_with_retries(ollama_endpoint or "", payload, config)
+                if config.log_responses:
+                    print(f"[response] {json.dumps(response, ensure_ascii=False)}")
+                content = response.get("message", {}).get("content", "")
+                if (
+                    config.ollama_fallback_no_format
+                    and config.ollama_format
+                    and (not content.strip() or _normalize_output(content) is None)
+                ):
+                    fallback_payload = dict(payload)
+                    fallback_payload.pop("format", None)
+                    fallback_response, fallback_duration = _ollama_request_with_retries(
+                        ollama_endpoint or "", fallback_payload, config
+                    )
+                    if config.log_responses:
+                        print(f"[response] {json.dumps(fallback_response, ensure_ascii=False)}")
+                    content = fallback_response.get("message", {}).get("content", "")
+                    duration = fallback_duration
+                items.append(content)
+                durations.append(duration)
+        else:
+            response, duration = _request_with_retries(llm, messages_batch, config)
+            if config.log_responses:
+                print(
+                    f"[response] batch={batch_start // config.batch_size} "
+                    f"{json.dumps([getattr(item, 'content', item) for item in response], ensure_ascii=False)}"
+                )
+            items = _extract_items(response)
+            durations = [duration for _ in items]
         if len(items) != len(batch_record_map):
             print(
                 f"[warn] response items {len(items)} != request items {len(batch_record_map)}"
             )
 
-        for record_idx, raw_item in zip(batch_record_map, items):
+        updated_in_batch = 0
+        for idx_offset, (record_idx, raw_item) in enumerate(zip(batch_record_map, items)):
             sample_id = records[record_idx].get("sample_id", "")
             content = getattr(raw_item, "content", raw_item)
             normalized = _normalize_output(content)
@@ -549,13 +672,18 @@ def run_labeler(config: LabelerConfig) -> int:
 
             records[record_idx].update(normalized)
             updated += 1
+            updated_in_batch += 1
             summary = {
                 "sample_id": sample_id,
-                "duration_sec": round(duration, 2),
+                "duration_sec": round(durations[idx_offset], 2) if idx_offset < len(durations) else None,
                 "uncertainty": normalized.get("uncertainty"),
                 "horizon_steps": normalized.get("horizon_steps"),
             }
             print(f"[sample] {json.dumps(summary, ensure_ascii=False)}")
+
+        if not config.dry_run and config.flush_every_batch and updated_in_batch:
+            _write_jsonl(output_path, records)
+            print(f"[flush] updated={updated} output={output_path}")
 
     if not config.dry_run:
         _write_jsonl(output_path, records)

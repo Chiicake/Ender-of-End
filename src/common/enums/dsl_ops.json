@@ -1,10 +1,767 @@
 {
-  "_comment": "List of DSL ops with parameter schema definitions.",
+  "_comment": "List of DSL ops with parameter schema definitions for a 3D action MMORPG (Genshin-like). Schemas use JSON-Schema-like fields; all numeric ranges are indicative and should be tuned per game/camera/input system.",
+  "version": "0.1.0",
+  "conventions": {
+    "time_unit": "seconds",
+    "angles_unit": "degrees",
+    "vec2": { "x": "float", "y": "float" },
+    "vec3": { "x": "float", "y": "float", "z": "float" },
+    "screen_uv": "normalized [0..1] with (0,0)=top-left",
+    "stick_xy": "normalized [-1..1] with deadzone handled by executor",
+    "id": "string identifier (e.g., target id, waypoint id, entity id)"
+  },
   "ops": [
+    {
+      "op": "NOOP",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "duration": { "type": "number", "minimum": 0.0, "maximum": 10.0, "default": 0.2 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "WAIT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 60.0 }
+          },
+          "required": ["duration"]
+        }
+      }
+    },
+    {
+      "op": "MOVE_STICK",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "stick": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
+                "y": { "type": "number", "minimum": -1.0, "maximum": 1.0 }
+              },
+              "required": ["x", "y"]
+            },
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 10.0, "default": 0.2 },
+            "run": { "type": "boolean", "default": false },
+            "lock_camera": { "type": "boolean", "default": false }
+          },
+          "required": ["stick"]
+        }
+      }
+    },
+    {
+      "op": "MOVE_TO_UV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "dest_uv": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "stop_radius": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.5 },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 60.0, "default": 10.0 },
+            "run": { "type": "boolean", "default": true }
+          },
+          "required": ["dest_uv"]
+        }
+      }
+    },
     {
       "op": "MOVE_NAV",
       "args": {
-        "schema": {}
+        "schema": {
+          "type": "object",
+          "properties": {
+            "goal": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "world": {
+                      "type": "object",
+                      "properties": {
+                        "x": { "type": "number" },
+                        "y": { "type": "number" },
+                        "z": { "type": "number" }
+                      },
+                      "required": ["x", "y", "z"]
+                    }
+                  },
+                  "required": ["world"]
+                },
+                {
+                  "type": "object",
+                  "properties": { "waypoint_id": { "type": "string", "minLength": 1 } },
+                  "required": ["waypoint_id"]
+                },
+                {
+                  "type": "object",
+                  "properties": { "target_id": { "type": "string", "minLength": 1 } },
+                  "required": ["target_id"]
+                }
+              ]
+            },
+            "stop_radius": { "type": "number", "minimum": 0.0, "maximum": 10.0, "default": 1.0 },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 300.0, "default": 30.0 },
+            "run": { "type": "boolean", "default": true },
+            "avoid_combat": { "type": "boolean", "default": false }
+          },
+          "required": ["goal"]
+        }
+      }
+    },
+    {
+      "op": "CAMERA_LOOK",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "delta": {
+              "type": "object",
+              "properties": {
+                "yaw": { "type": "number", "minimum": -720.0, "maximum": 720.0 },
+                "pitch": { "type": "number", "minimum": -720.0, "maximum": 720.0 }
+              },
+              "required": ["yaw", "pitch"]
+            },
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 5.0, "default": 0.2 },
+            "smoothing": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.2 }
+          },
+          "required": ["delta"]
+        }
+      }
+    },
+    {
+      "op": "CAMERA_FACE_UV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "aim_uv": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "tolerance_px": { "type": "number", "minimum": 0.0, "maximum": 500.0, "default": 20.0 },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 10.0, "default": 2.0 }
+          },
+          "required": ["aim_uv"]
+        }
+      }
+    },
+    {
+      "op": "CAMERA_LOCK",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "JUMP",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "tap": { "type": "boolean", "default": true },
+            "hold_duration": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "DODGE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "direction": {
+              "type": "object",
+              "properties": {
+                "x": { "type": "number", "minimum": -1.0, "maximum": 1.0 },
+                "y": { "type": "number", "minimum": -1.0, "maximum": 1.0 }
+              },
+              "required": ["x", "y"]
+            },
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 0.5, "default": 0.1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SPRINT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" },
+            "duration": { "type": "number", "minimum": 0.0, "maximum": 10.0, "default": 0.0 }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "CROUCH",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "CLIMB",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "GLIDE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "SWIM",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "ATTACK_LIGHT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "count": { "type": "integer", "minimum": 1, "maximum": 10, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "ATTACK_HEAVY",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "charge": { "type": "boolean", "default": false },
+            "charge_duration": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "AIM_MODE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "enable": { "type": "boolean" }
+          },
+          "required": ["enable"]
+        }
+      }
+    },
+    {
+      "op": "SHOOT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "hold_duration": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.1 },
+            "burst": { "type": "integer", "minimum": 1, "maximum": 20, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SKILL_1",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "tap": { "type": "boolean", "default": true },
+            "hold_duration": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SKILL_2",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "tap": { "type": "boolean", "default": true },
+            "hold_duration": { "type": "number", "minimum": 0.0, "maximum": 5.0, "default": 0.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "ULTIMATE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "tap": { "type": "boolean", "default": true }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "INTERACT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string", "enum": ["KEY", "CLICK_UV", "AUTO"] , "default": "AUTO" },
+            "target": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": { "target_id": { "type": "string", "minLength": 1 } },
+                  "required": ["target_id"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "uv": {
+                      "type": "object",
+                      "properties": {
+                        "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                        "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+                      },
+                      "required": ["u", "v"]
+                    }
+                  },
+                  "required": ["uv"]
+                }
+              ]
+            },
+            "hold_duration": { "type": "number", "minimum": 0.0, "maximum": 3.0, "default": 0.1 },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 10.0, "default": 2.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "PICKUP_LOOT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "strategy": { "type": "string", "enum": ["NEARBY", "ALL_VISIBLE", "TARGETED"], "default": "NEARBY" },
+            "target_id": { "type": "string" },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 30.0, "default": 5.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "TARGET_LOCK",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["NEXT", "PREV", "SET", "CLEAR"], "default": "NEXT" },
+            "target_id": { "type": "string" }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "USE_ITEM",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "item_id": { "type": "string", "minLength": 1 },
+            "count": { "type": "integer", "minimum": 1, "maximum": 99, "default": 1 }
+          },
+          "required": ["item_id"]
+        }
+      }
+    },
+    {
+      "op": "OPEN_MENU",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "menu": {
+              "type": "string",
+              "enum": ["PAUSE", "MAP", "INVENTORY", "CHARACTER", "QUEST", "SETTINGS", "SOCIAL", "UNKNOWN"],
+              "default": "PAUSE"
+            }
+          },
+          "required": ["menu"]
+        }
+      }
+    },
+    {
+      "op": "CLOSE_MENU",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string", "enum": ["ESC", "BACK", "AUTO"], "default": "AUTO" }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "CLICK_UV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "uv": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "button": { "type": "string", "enum": ["LEFT", "RIGHT", "MIDDLE"], "default": "LEFT" },
+            "clicks": { "type": "integer", "minimum": 1, "maximum": 5, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05 }
+          },
+          "required": ["uv"]
+        }
+      }
+    },
+    {
+      "op": "DRAG_UV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "from_uv": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "to_uv": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "button": { "type": "string", "enum": ["LEFT", "RIGHT"], "default": "LEFT" },
+            "duration": { "type": "number", "minimum": 0.01, "maximum": 5.0, "default": 0.2 }
+          },
+          "required": ["from_uv", "to_uv"]
+        }
+      }
+    },
+    {
+      "op": "SCROLL",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "delta": { "type": "number", "minimum": -5000.0, "maximum": 5000.0 },
+            "uv_anchor": {
+              "type": "object",
+              "properties": {
+                "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+              },
+              "required": ["u", "v"]
+            },
+            "duration": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.0 }
+          },
+          "required": ["delta"]
+        }
+      }
+    },
+    {
+      "op": "SELECT_CHARACTER",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "slot": { "type": "integer", "minimum": 1, "maximum": 8 },
+            "character_id": { "type": "string" }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SWAP_CHARACTER_NEXT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "count": { "type": "integer", "minimum": 1, "maximum": 8, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SWAP_CHARACTER_PREV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "count": { "type": "integer", "minimum": 1, "maximum": 8, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SET_POV",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "mode": { "type": "string", "enum": ["THIRD_PERSON", "FIRST_PERSON", "AIM"], "default": "THIRD_PERSON" }
+          },
+          "required": ["mode"]
+        }
+      }
+    },
+    {
+      "op": "FAST_TRAVEL",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "destination": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": { "teleport_id": { "type": "string", "minLength": 1 } },
+                  "required": ["teleport_id"]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "map_uv": {
+                      "type": "object",
+                      "properties": {
+                        "u": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                        "v": { "type": "number", "minimum": 0.0, "maximum": 1.0 }
+                      },
+                      "required": ["u", "v"]
+                    }
+                  },
+                  "required": ["map_uv"]
+                }
+              ]
+            },
+            "confirm": { "type": "boolean", "default": true },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 60.0, "default": 15.0 }
+          },
+          "required": ["destination"]
+        }
+      }
+    },
+    {
+      "op": "OPEN_QUEST",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "quest_id": { "type": "string" },
+            "filter": { "type": "string", "enum": ["TRACKED", "MAIN", "SIDE", "DAILY", "ALL"], "default": "TRACKED" }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "TRACK_QUEST",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "quest_id": { "type": "string", "minLength": 1 },
+            "enable": { "type": "boolean", "default": true }
+          },
+          "required": ["quest_id"]
+        }
+      }
+    },
+    {
+      "op": "DIALOGUE_ADVANCE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "method": { "type": "string", "enum": ["CLICK", "KEY", "AUTO"], "default": "AUTO" },
+            "count": { "type": "integer", "minimum": 1, "maximum": 50, "default": 1 },
+            "interval": { "type": "number", "minimum": 0.0, "maximum": 2.0, "default": 0.2 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "DIALOGUE_SELECT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "option_index": { "type": "integer", "minimum": 1, "maximum": 10 },
+            "option_text": { "type": "string", "minLength": 0 },
+            "timeout": { "type": "number", "minimum": 0.1, "maximum": 10.0, "default": 2.0 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "CONSUME_STAMINA_FOOD",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "item_id": { "type": "string" },
+            "count": { "type": "integer", "minimum": 1, "maximum": 10, "default": 1 }
+          },
+          "required": []
+        }
+      }
+    },
+    {
+      "op": "SETTINGS_TOGGLE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "setting": { "type": "string", "minLength": 1 },
+            "value": { "type": ["boolean", "number", "string"] }
+          },
+          "required": ["setting", "value"]
+        }
+      }
+    },
+    {
+      "op": "ASSERT_STATE",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "predicates": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": { "type": "string", "minLength": 1 },
+                  "op": { "type": "string", "enum": ["EQ", "NE", "GT", "GTE", "LT", "LTE", "IN", "NOT_IN", "EXISTS", "NOT_EXISTS"] },
+                  "value": { "type": ["string", "number", "boolean", "array", "object", "null"] }
+                },
+                "required": ["key", "op"]
+              }
+            },
+            "on_fail": { "type": "string", "enum": ["ABORT", "RETRY", "IGNORE"], "default": "ABORT" },
+            "retry": {
+              "type": "object",
+              "properties": {
+                "max_attempts": { "type": "integer", "minimum": 0, "maximum": 20, "default": 0 },
+                "backoff": { "type": "number", "minimum": 0.0, "maximum": 10.0, "default": 0.2 }
+              },
+              "required": []
+            }
+          },
+          "required": ["predicates"]
+        }
+      }
+    },
+    {
+      "op": "SET_BLACKBOARD",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "key": { "type": "string", "minLength": 1 },
+            "value": { "type": ["string", "number", "boolean", "array", "object", "null"] }
+          },
+          "required": ["key", "value"]
+        }
+      }
+    },
+    {
+      "op": "EMIT_EVENT",
+      "args": {
+        "schema": {
+          "type": "object",
+          "properties": {
+            "name": { "type": "string", "minLength": 1 },
+            "payload": { "type": ["object", "array", "string", "number", "boolean", "null"], "default": {} }
+          },
+          "required": ["name"]
+        }
       }
     }
   ]
