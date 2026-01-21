@@ -1,6 +1,6 @@
 {
   "_comment": "List of detectable completion evidence tags.",
   "done_evidence": [
-    "dialog_open"
+    ""
   ]
 }

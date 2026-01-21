@@ -15,6 +15,7 @@ VLM Labeler 负责把短视频片段标注为结构化 `plan_json`（含 DSL sho
 Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - `src/common/enums/dsl_ops.json`（操作符与参数约束）
 - `src/common/enums/done_evidence.json`（完成证据）
+- `src/common/enums/fallback_actions.json`（失败回退）
 
 ### 视频片段
 - **recent_clip**：`[t-7..t]`（8 帧，4 秒）
@@ -32,6 +33,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
   "short_goal_dsl": [{"op": "MOVE_NAV", "args": {"...": "..."}}],
   "horizon_steps": 10,
   "done_evidence": ["dialog_open"],
+  "fallback_if_failed": ["recenter_camera"],
   "uncertainty": "low|mid|high",
   "attempt": "接下来我应该先打开地图，寻找四号谷地，并传送"
 }
@@ -41,6 +43,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 - `goal`：只允许 `<|goal_start|>长期目标/中期目标<|goal_end|>` 格式。
 - `short_goal_dsl`：仅使用 DSL op 枚举表中的操作。
 - `done_evidence`：仅使用证据枚举表中的条目。
+- `fallback_if_failed`：仅使用 fallback 枚举表中的条目。
 - `uncertainty`：用于过滤和抽检，`high` 默认剔除。
 
 ### 自动生成字段
@@ -102,7 +105,7 @@ Labeler 与 Dataset Builder 通过以下文件动态读取枚举内容：
 ### 推荐策略
 - `batch_size=8`
 - `max_retries=3`，指数退避 1s/2s/4s
-- 缓存键：`clip_hash + goal + schema_version`
+- 缓存键：`clip_hash + goal + labeling_instruct + schema_version`
 
 ## 质量控制
 - 强制 schema 校验与枚举校验，不通过直接剔除。

@@ -6,11 +6,8 @@
 - 可抽检/可人工查看的样本文件夹（每样本一目录）
 
 ## 输入
-- **视频**：2FPS（按帧序号读取）
-- **动作**：每 500ms 一行 action string（推荐 `compiled_actions.jsonl`）
-- （可选）`goal.jsonl`：逐步对齐的目标文本
-- （可选）`labeling_instruct.jsonl`：逐步对齐的标注提示文本
-- （可选）`mid_step` 标注：帧区间标注 `mid_step_id/text`
+- **zip 包**：包含一个或多个 session 目录（例如 `sessions.zip`）
+- **输出目录**：将 clip_index 与 clips 导出到该目录（由调用者指定）
 
 ### 输入示例结构（sessions/）
 ```
@@ -26,6 +23,7 @@ sessions/<session_id>/
 ```
 `compiled_actions.jsonl` 行号对应帧序号（与 `step_index` 对齐）。
 `goal.jsonl` / `labeling_instruct.jsonl` 也按行号与 `step_index` 对齐。
+zip 解压后应包含顶层 `sessions/` 目录。
 
 ## 对齐规则
 不做时间戳对齐，直接按序号对齐：
@@ -44,7 +42,7 @@ sessions/<session_id>/
 
 ## 输出
 ### 1) 索引文件（训练主产物）
-`datasets/clip_index.jsonl`（示例字段）：
+`<output_dir>/clip_index.jsonl`（示例字段）：
 ```json
 {
   "sample_id": "ep001_t0123",
@@ -61,7 +59,7 @@ sessions/<session_id>/
 ```
 
 ### 2) 样本文件夹（可选导出）
-`datasets/clips/<sample_id>/`（推荐仅抽样导出）：
+`<output_dir>/clips/<sample_id>/`（推荐仅抽样导出）：
 ```
 datasets/clips/ep001_t0123/
   recent/              # 8 帧
@@ -74,7 +72,14 @@ datasets/clips/ep001_t0123/
   meta.json            # sample_id/anchor_t/mid_step
   label.json           # 标注输出（若已生成）
 ```
-建议使用 **软链接/硬链接** 指向原始帧，避免重复拷贝。
+
+### 3) 帧缓存目录（可选）
+当输入为 `video.mp4` 时，可在输出目录中生成帧缓存：
+```
+<output_dir>/frames/
+```
+用于索引与样本目录引用，避免重复解码视频。
+
 
 ## 采样策略
 - **滑窗步长**：2 帧（= 1 秒）

@@ -1,61 +1,50 @@
 #!/usr/bin/env python3
 """
-Clip extractor for 2FPS video + action string.
+Clip extractor for sessions.zip input. Need ffmpeg.
+
+Usage examples:
+  python scripts/clip_extractor.py --zip dataset/example/sessions.zip --output out/
+  python scripts/clip_extractor.py --zip sessions.zip --output out/ --export-clips --export-ratio 0.02
+  python scripts/clip_extractor.py --zip sessions.zip --output out/ --allow-partial
 
 Outputs:
-  - JSONL index for training
-  - Optional per-sample folders for QA
+  - clip_index.jsonl
+  - optional per-sample folders under output_dir/clips
+  - optional frames cache under output_dir/frames/<session_id>
 """
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import os
 import random
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+import zipfile
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable
 
 
-@dataclass
-class MidStepSpan:
-    start_frame: int
-    end_frame: int
-    mid_step_id: str
-    mid_step_text: str
-
-
-def _read_actions(path: Path) -> list[str]:
-    actions: list[str] = []
+def _read_lines(path: Path) -> list[str]:
+    lines: list[str] = []
     with path.open("r", encoding="utf-8") as handle:
-        for line in handle:
-            line = line.strip()
+        for raw in handle:
+            line = raw.strip()
             if not line:
                 continue
-            actions.append(line)
-    return actions
+            lines.append(line)
+    return lines
 
 
-def _list_frames(frames_dir: Path) -> list[Path]:
-    frames = sorted(frames_dir.glob("*"))
-    frames = [p for p in frames if p.is_file()]
-    return frames
-
-
-def _ensure_frames(video_path: Optional[Path], frames_dir: Path, fps: int) -> list[Path]:
+def _ensure_frames(video_path: Path, frames_dir: Path, fps: int) -> list[Path]:
     frames_dir.mkdir(parents=True, exist_ok=True)
-    existing = _list_frames(frames_dir)
+    existing = sorted(p for p in frames_dir.glob("*.jpg") if p.is_file())
     if existing:
         return existing
-    if video_path is None:
-        raise ValueError("frames_dir is empty and no video path was provided.")
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        raise RuntimeError("ffmpeg not found; provide --frames-dir with pre-extracted frames.")
+        raise RuntimeError("ffmpeg not found; provide pre-extracted frames.")
     output_pattern = frames_dir / "%06d.jpg"
     cmd = [
         ffmpeg,
@@ -65,58 +54,54 @@ def _ensure_frames(video_path: Optional[Path], frames_dir: Path, fps: int) -> li
         f"fps={fps}",
         "-q:v",
         "2",
+        "-start_number",
+        "0",
         str(output_pattern),
     ]
     subprocess.run(cmd, check=True)
-    return _list_frames(frames_dir)
+    return sorted(p for p in frames_dir.glob("*.jpg") if p.is_file())
 
 
-def _read_mid_steps(path: Path) -> list[MidStepSpan]:
-    spans: list[MidStepSpan] = []
-    if path.suffix.lower() == ".jsonl":
-        with path.open("r", encoding="utf-8") as handle:
-            for line in handle:
-                line = line.strip()
-                if not line:
-                    continue
-                rec = json.loads(line)
-                spans.append(
-                    MidStepSpan(
-                        start_frame=int(rec["start_frame"]),
-                        end_frame=int(rec["end_frame"]),
-                        mid_step_id=str(rec["mid_step_id"]),
-                        mid_step_text=str(rec["mid_step_text"]),
-                    )
-                )
-    elif path.suffix.lower() == ".csv":
-        with path.open("r", encoding="utf-8") as handle:
-            reader = csv.DictReader(handle)
-            for rec in reader:
-                spans.append(
-                    MidStepSpan(
-                        start_frame=int(rec["start_frame"]),
-                        end_frame=int(rec["end_frame"]),
-                        mid_step_id=str(rec["mid_step_id"]),
-                        mid_step_text=str(rec["mid_step_text"]),
-                    )
-                )
-    else:
-        raise ValueError("mid_steps file must be .jsonl or .csv")
-    return spans
+def _relative_paths(paths: list[Path], root: Path) -> list[str]:
+    return [str(p.relative_to(root)) for p in paths]
 
 
-def _build_mid_step_lookup(
-    spans: list[MidStepSpan], frame_count: int
-) -> list[Optional[MidStepSpan]]:
-    lookup: list[Optional[MidStepSpan]] = [None] * frame_count
-    for span in spans:
-        if span.start_frame < 0 or span.end_frame < span.start_frame:
-            raise ValueError(f"invalid mid_step span: {span}")
-        for idx in range(span.start_frame, min(span.end_frame + 1, frame_count)):
-            if lookup[idx] is not None:
-                raise ValueError(f"overlapping mid_step at frame {idx}")
-            lookup[idx] = span
-    return lookup
+def _indices_recent(t: int) -> list[int]:
+    return list(range(t - 7, t + 1))
+
+
+def _indices_lookahead(t: int) -> list[int]:
+    return list(range(t, t + 8))
+
+
+def _indices_summary(t: int) -> list[int]:
+    # 60s window at 2FPS -> 120 frames; sample every 2s -> 30 frames
+    return list(range(t - 120, t, 4))
+
+
+def _indices_lookahead_summary(t: int) -> list[int]:
+    return list(range(t, t + 120, 4))
+
+
+def _all_in_range(indices: Iterable[int], start: int, end: int) -> bool:
+    return all(start <= idx <= end for idx in indices)
+
+
+def _extract_zip(zip_path: Path, output_dir: Path) -> Path:
+    unpack_dir = output_dir / "_sessions" / zip_path.stem
+    if unpack_dir.exists():
+        return unpack_dir
+    unpack_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        archive.extractall(unpack_dir)
+    return unpack_dir
+
+
+def _find_sessions_root(unpack_dir: Path) -> Path:
+    candidate = unpack_dir / "sessions"
+    if candidate.exists():
+        return candidate
+    return unpack_dir
 
 
 def _link_file(src: Path, dst: Path, mode: str) -> None:
@@ -131,41 +116,147 @@ def _link_file(src: Path, dst: Path, mode: str) -> None:
         raise ValueError(f"unknown link mode: {mode}")
 
 
-def _indices_recent(t: int) -> list[int]:
-    return list(range(t - 7, t + 1))
+def _clip_indices(indices: Iterable[int], count: int) -> list[int]:
+    return [idx for idx in indices if 0 <= idx < count]
 
 
-def _indices_lookahead(t: int) -> list[int]:
-    return list(range(t, t + 8))
+def extract_clips(
+    zip_path: Path,
+    output_dir: Path,
+    fps: int = 2,
+    step: int = 2,
+    allow_partial: bool = False,
+    export_clips: bool = False,
+    export_ratio: float = 0.01,
+    link_mode: str = "hardlink",
+    seed: int = 0,
+) -> tuple[Path, int]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    rng = random.Random(seed)
 
+    unpack_dir = _extract_zip(zip_path, output_dir)
+    sessions_root = _find_sessions_root(unpack_dir)
+    if not sessions_root.exists():
+        raise ValueError("sessions root not found after unzip.")
 
-def _indices_summary(t: int) -> list[int]:
-    # 60s window at 2FPS -> 120 frames; sample every 2s -> step of 4 frames
-    return list(range(t - 120, t + 1, 4))
+    index_path = output_dir / "clip_index.jsonl"
+    samples_written = 0
 
+    with index_path.open("w", encoding="utf-8") as index_handle:
+        for session_dir in sorted(p for p in sessions_root.iterdir() if p.is_dir()):
+            session_id = session_dir.name
+            video_path = session_dir / "video.mp4"
+            compiled_actions = session_dir / "compiled_actions.jsonl"
+            goal_path = session_dir / "goal.jsonl"
+            instruct_path = session_dir / "labeling_instruct.jsonl"
 
-def _indices_lookahead_summary(t: int) -> list[int]:
-    return list(range(t, t + 121, 4))
+            if not video_path.exists() or not compiled_actions.exists():
+                print(f"skip {session_id}: missing video or compiled_actions", file=sys.stderr)
+                continue
 
+            frames_dir = output_dir / "frames" / session_id
+            frames = _ensure_frames(video_path, frames_dir, fps)
+            actions = _read_lines(compiled_actions)
+            if not frames or not actions:
+                print(f"skip {session_id}: no frames or actions", file=sys.stderr)
+                continue
 
-def _all_in_range(indices: Iterable[int], start: int, end: int) -> bool:
-    return all(start <= idx <= end for idx in indices)
+            count = min(len(frames), len(actions))
+            if len(frames) != len(actions):
+                print(
+                    f"warning: {session_id} frames({len(frames)}) != actions({len(actions)}); using {count}",
+                    file=sys.stderr,
+                )
+            frames = frames[:count]
+            actions = actions[:count]
 
+            goals = _read_lines(goal_path) if goal_path.exists() else []
+            instructs = _read_lines(instruct_path) if instruct_path.exists() else []
 
-def _relative_paths(paths: list[Path], root: Path) -> list[str]:
-    return [str(p.relative_to(root)) for p in paths]
+            if allow_partial:
+                min_t = 0
+                max_t = count - 1
+            else:
+                min_t = 120
+                max_t = count - 117
+            if min_t >= max_t:
+                print(f"warning: {session_id} not enough frames for windows", file=sys.stderr)
+                continue
+
+            for t in range(min_t, max_t + 1, step):
+                recent_idx = _indices_recent(t)
+                summary_idx = _indices_summary(t)
+                lookahead_idx = _indices_lookahead(t)
+                lookahead_summary_idx = _indices_lookahead_summary(t)
+
+                if allow_partial:
+                    recent_idx = _clip_indices(recent_idx, count)
+                    summary_idx = _clip_indices(summary_idx, count)
+                    lookahead_idx = _clip_indices(lookahead_idx, count)
+                    lookahead_summary_idx = _clip_indices(lookahead_summary_idx, count)
+                else:
+                    if recent_idx[0] < 0 or lookahead_summary_idx[-1] >= count:
+                        continue
+
+                sample_id = f"{session_id}_t{t:06d}"
+                record = {
+                    "sample_id": sample_id,
+                    "session_id": session_id,
+                    "anchor_t": t,
+                    "recent_clip": _relative_paths([frames[i] for i in recent_idx], output_dir),
+                    "summary_clip": _relative_paths([frames[i] for i in summary_idx], output_dir),
+                    "lookahead_clip": _relative_paths([frames[i] for i in lookahead_idx], output_dir),
+                    "lookahead_summary_clip": _relative_paths(
+                        [frames[i] for i in lookahead_summary_idx], output_dir
+                    ),
+                    "action_t": actions[t],
+                    "goal_t": goals[t] if t < len(goals) else "",
+                    "instruct_t": instructs[t] if t < len(instructs) else "",
+                }
+
+                index_handle.write(json.dumps(record, ensure_ascii=True) + "\n")
+                samples_written += 1
+
+                if export_clips and rng.random() <= export_ratio:
+                    sample_dir = output_dir / "clips" / sample_id
+                    recent_dir = sample_dir / "recent"
+                    summary_dir = sample_dir / "summary"
+                    lookahead_dir = sample_dir / "lookahead"
+                    lookahead_summary_dir = sample_dir / "lookahead_summary"
+                    for src in [frames[i] for i in recent_idx]:
+                        _link_file(src, recent_dir / src.name, link_mode)
+                    for src in [frames[i] for i in summary_idx]:
+                        _link_file(src, summary_dir / src.name, link_mode)
+                    for src in [frames[i] for i in lookahead_idx]:
+                        _link_file(src, lookahead_dir / src.name, link_mode)
+                    for src in [frames[i] for i in lookahead_summary_idx]:
+                        _link_file(src, lookahead_summary_dir / src.name, link_mode)
+                    (sample_dir / "action.txt").write_text(actions[t] + "\n", encoding="utf-8")
+                    if record["goal_t"]:
+                        (sample_dir / "goal.txt").write_text(record["goal_t"] + "\n", encoding="utf-8")
+                    if record["instruct_t"]:
+                        (sample_dir / "labeling_instruct.txt").write_text(
+                            record["instruct_t"] + "\n", encoding="utf-8"
+                        )
+                    meta = {"sample_id": sample_id, "anchor_t": t, "session_id": session_id}
+                    (sample_dir / "meta.json").write_text(
+                        json.dumps(meta, ensure_ascii=True, indent=2) + "\n"
+                    )
+
+    return index_path, samples_written
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Extract clips for labeling/training.")
-    parser.add_argument("--video", type=Path, help="Path to video file (optional if frames_dir provided).")
-    parser.add_argument("--frames-dir", type=Path, help="Directory containing pre-extracted frames.")
-    parser.add_argument("--actions", type=Path, required=True, help="Action string file (1 line per frame).")
-    parser.add_argument("--mid-steps", type=Path, help="Optional mid_step spans (.jsonl or .csv).")
+    parser = argparse.ArgumentParser(description="Extract clips from sessions.zip.")
+    parser.add_argument("--zip", type=Path, required=True, help="Path to sessions.zip.")
     parser.add_argument("--output", type=Path, required=True, help="Output directory.")
-    parser.add_argument("--episode-id", type=str, help="Episode id for sample ids.")
     parser.add_argument("--fps", type=int, default=2, help="FPS for frame extraction.")
     parser.add_argument("--step", type=int, default=2, help="Anchor step in frames.")
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Keep samples even if any clip window is partial at boundaries.",
+    )
     parser.add_argument("--export-clips", action="store_true", help="Export per-sample folders.")
     parser.add_argument("--export-ratio", type=float, default=0.01, help="Fraction of samples to export.")
     parser.add_argument(
@@ -177,111 +268,17 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0, help="Random seed for export sampling.")
     args = parser.parse_args()
 
-    if args.frames_dir is None and args.video is None:
-        raise SystemExit("Either --video or --frames-dir must be provided.")
-
-    output_dir = args.output
-    output_dir.mkdir(parents=True, exist_ok=True)
-    frames_dir = args.frames_dir or (output_dir / "frames")
-
-    frames = _ensure_frames(args.video, frames_dir, args.fps)
-    actions = _read_actions(args.actions)
-    if not frames or not actions:
-        raise SystemExit("No frames or actions found.")
-
-    count = min(len(frames), len(actions))
-    if len(frames) != len(actions):
-        print(
-            f"warning: frames({len(frames)}) != actions({len(actions)}); using first {count}",
-            file=sys.stderr,
-        )
-    frames = frames[:count]
-    actions = actions[:count]
-
-    mid_step_lookup: Optional[list[Optional[MidStepSpan]]] = None
-    if args.mid_steps:
-        spans = _read_mid_steps(args.mid_steps)
-        mid_step_lookup = _build_mid_step_lookup(spans, count)
-
-    episode_id = args.episode_id or (args.video.stem if args.video else "episode")
-    index_path = output_dir / "clip_index.jsonl"
-    rng = random.Random(args.seed)
-
-    samples_written = 0
-    with index_path.open("w", encoding="utf-8") as index_handle:
-        min_t = 120
-        max_t = count - 1 - 120
-        if min_t >= max_t:
-            print("warning: not enough frames for full windows; no samples generated.", file=sys.stderr)
-            return 0
-
-        for t in range(min_t, max_t + 1, args.step):
-            recent_idx = _indices_recent(t)
-            summary_idx = _indices_summary(t)
-            lookahead_idx = _indices_lookahead(t)
-            lookahead_summary_idx = _indices_lookahead_summary(t)
-
-            if recent_idx[0] < 0 or lookahead_summary_idx[-1] >= count:
-                continue
-
-            if mid_step_lookup is not None:
-                span = mid_step_lookup[t]
-                if span is None:
-                    continue
-                if not (
-                    _all_in_range(recent_idx, span.start_frame, span.end_frame)
-                    and _all_in_range(summary_idx, span.start_frame, span.end_frame)
-                    and _all_in_range(lookahead_idx, span.start_frame, span.end_frame)
-                    and _all_in_range(lookahead_summary_idx, span.start_frame, span.end_frame)
-                ):
-                    continue
-            else:
-                span = None
-
-            sample_id = f"{episode_id}_t{t:06d}"
-            record = {
-                "sample_id": sample_id,
-                "episode_id": episode_id,
-                "anchor_t": t,
-                "frames_root": str(frames_dir),
-                "recent_clip": _relative_paths([frames[i] for i in recent_idx], frames_dir),
-                "summary_clip": _relative_paths([frames[i] for i in summary_idx], frames_dir),
-                "lookahead_clip": _relative_paths([frames[i] for i in lookahead_idx], frames_dir),
-                "lookahead_summary_clip": _relative_paths(
-                    [frames[i] for i in lookahead_summary_idx], frames_dir
-                ),
-                "action_t": actions[t],
-            }
-            if span is not None:
-                record["mid_step_id"] = span.mid_step_id
-                record["mid_step_text"] = span.mid_step_text
-
-            index_handle.write(json.dumps(record, ensure_ascii=True) + "\n")
-            samples_written += 1
-
-            if args.export_clips and rng.random() <= args.export_ratio:
-                sample_dir = output_dir / "clips" / sample_id
-                recent_dir = sample_dir / "recent"
-                summary_dir = sample_dir / "summary"
-                lookahead_dir = sample_dir / "lookahead"
-                lookahead_summary_dir = sample_dir / "lookahead_summary"
-                for src in [frames[i] for i in recent_idx]:
-                    _link_file(src, recent_dir / src.name, args.link_mode)
-                for src in [frames[i] for i in summary_idx]:
-                    _link_file(src, summary_dir / src.name, args.link_mode)
-                for src in [frames[i] for i in lookahead_idx]:
-                    _link_file(src, lookahead_dir / src.name, args.link_mode)
-                for src in [frames[i] for i in lookahead_summary_idx]:
-                    _link_file(src, lookahead_summary_dir / src.name, args.link_mode)
-                (sample_dir / "action.txt").write_text(actions[t] + "\n", encoding="utf-8")
-                meta = {
-                    "sample_id": sample_id,
-                    "anchor_t": t,
-                    "mid_step_id": record.get("mid_step_id"),
-                    "mid_step_text": record.get("mid_step_text"),
-                }
-                (sample_dir / "meta.json").write_text(json.dumps(meta, ensure_ascii=True, indent=2) + "\n")
-
+    index_path, samples_written = extract_clips(
+        zip_path=args.zip,
+        output_dir=args.output,
+        fps=args.fps,
+        step=args.step,
+        allow_partial=args.allow_partial,
+        export_clips=args.export_clips,
+        export_ratio=args.export_ratio,
+        link_mode=args.link_mode,
+        seed=args.seed,
+    )
     print(f"wrote {samples_written} samples to {index_path}")
     return 0
 
