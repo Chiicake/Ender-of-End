@@ -1,13 +1,9 @@
 # Ender-of-End
 
+施工中。。。
+
 ## Overview
 This repository currently contains design and technical documentation for a Python-first training framework and runtime loop. The target system covers data collection, labeling, training (Planner/Controller LoRA), evaluation, and runtime orchestration.
-
-## Repository Layout
-- `docs/`：设计文档与技术文档（中文）
-- `scripts/`：可运行工具入口（clip_extractor / vlm_labeler）
-- `src/`：核心库代码（labeler 逻辑与枚举）
-- `dataset/`：示例数据（如 sessions.zip）
 
 ## Install Dependencies
 ```bash
