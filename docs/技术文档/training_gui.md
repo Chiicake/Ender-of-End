@@ -39,6 +39,11 @@ src/tools/training_gui
 4) 日志实时显示并写入文件。
 5) 点击 “停止” 发送终止信号，等待进程退出。
 
+## 启动方式
+```
+python3 scripts/training_gui.py
+```
+
 ## 配置与目录
 ```
 runs/
@@ -50,6 +55,17 @@ runs/
 ```
 - `config.json` 保存当次运行的所有参数。
 - 所有任务均从 GUI 调起，不直接修改业务代码。
+
+## GUI 配置持久化
+GUI 配置持久化到 `config/gui/`，按模块独立保存：
+```
+config/gui/
+  clip_extractor.json
+  vlm_labeler.json
+  planner.json
+  controller.json
+```
+- 启动时自动加载；不存在则创建默认配置文件。
 
 ## 日志策略
 - stdout/stderr **双通道**写入并实时展示。

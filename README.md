@@ -32,5 +32,11 @@ python3 scripts/vlm_labeler.py --input-dir out/ --backend ollama --base-url http
 ```
 可选环境变量：`VLM_LABELER_BASE_URL`, `VLM_LABELER_MODEL`, `VLM_LABELER_API_KEY`, `VLM_LABELER_ENDPOINT`, `VLM_LABELER_BACKEND`
 
+### Training GUI
+桌面 GUI（数据裁切 / VLM 标注 / 训练入口）。
+```bash
+python3 scripts/training_gui.py
+```
+
 ## Build, Test, and Run
 目前未定义构建或测试命令；新增工具后请在此补充。
