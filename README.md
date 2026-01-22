@@ -1,6 +1,6 @@
 # Ender-of-End
 
-施工中。。。
+施工中...
 
 ## Overview
 This repository currently contains design and technical documentation for a Python-first training framework and runtime loop. The target system covers data collection, labeling, training (Planner/Controller LoRA), evaluation, and runtime orchestration.
@@ -34,5 +34,3 @@ python3 scripts/vlm_labeler.py --input-dir out/ --backend ollama --base-url http
 python3 scripts/training_gui.py
 ```
 
-## Build, Test, and Run
-目前未定义构建或测试命令；新增工具后请在此补充。
