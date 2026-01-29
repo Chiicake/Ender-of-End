@@ -62,10 +62,12 @@ class TrainingGUI(QMainWindow):
 
         self._tabs = QTabWidget()
         self._clip_tab = self._build_clip_tab()
+        self._builder_tab = self._build_builder_tab()
         self._labeler_tab = self._build_labeler_tab()
         self._planner_tab = self._build_placeholder_tab("Planner training is not implemented.")
         self._controller_tab = self._build_placeholder_tab("Controller training is not implemented.")
         self._tabs.addTab(self._clip_tab, "Clip Extractor")
+        self._tabs.addTab(self._builder_tab, "Dataset Builder")
         self._tabs.addTab(self._labeler_tab, "VLM Labeler")
         self._tabs.addTab(self._planner_tab, "Planner Training")
         self._tabs.addTab(self._controller_tab, "Controller Training")
@@ -211,6 +213,30 @@ class TrainingGUI(QMainWindow):
         tab.setLayout(layout)
         return tab
 
+    def _build_builder_tab(self) -> QWidget:
+        tab = QWidget()
+        layout = QVBoxLayout()
+
+        self._builder_mode = QComboBox()
+        self._builder_mode.addItems(["planner", "controller"])
+        self._builder_input_dir = self._path_row("input dir", dir_mode=True)
+        self._builder_output_dir = self._path_row("output dir", dir_mode=True)
+        self._builder_allow_empty_retrieval = QCheckBox("allow empty retrieved_memory")
+        self._builder_allow_empty_retrieval.setChecked(True)
+
+        form = QFormLayout()
+        form.addRow("mode", self._builder_mode)
+        form.addRow("input dir", self._builder_input_dir)
+        form.addRow("output dir", self._builder_output_dir)
+        form.addRow("", self._builder_allow_empty_retrieval)
+
+        group = QGroupBox("Dataset Builder")
+        group.setLayout(form)
+        layout.addWidget(group)
+        layout.addStretch(1)
+        tab.setLayout(layout)
+        return tab
+
     def _build_placeholder_tab(self, text: str) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout()
@@ -272,6 +298,12 @@ class TrainingGUI(QMainWindow):
             self._apply_clip_config(clip)
         else:
             self._save_module_config("clip_extractor", self._collect_clip_config())
+
+        builder = self._load_module_config("dataset_builder")
+        if builder:
+            self._apply_builder_config(builder)
+        else:
+            self._save_module_config("dataset_builder", self._collect_builder_config())
 
         labeler = self._load_module_config("vlm_labeler")
         if labeler:
@@ -372,6 +404,26 @@ class TrainingGUI(QMainWindow):
         if "ollama_num_predict" in config:
             self._label_ollama_num_predict.setValue(int(config["ollama_num_predict"]))
 
+    def _collect_builder_config(self) -> dict[str, Any]:
+        return {
+            "mode": self._builder_mode.currentText(),
+            "input_dir": self._get_path_value(self._builder_input_dir),
+            "output_dir": self._get_path_value(self._builder_output_dir),
+            "allow_empty_retrieval": self._builder_allow_empty_retrieval.isChecked(),
+        }
+
+    def _apply_builder_config(self, config: dict[str, Any]) -> None:
+        if "mode" in config:
+            idx = self._builder_mode.findText(str(config["mode"]))
+            if idx >= 0:
+                self._builder_mode.setCurrentIndex(idx)
+        if "input_dir" in config:
+            self._builder_input_dir._edit.setText(str(config["input_dir"]))  # type: ignore[attr-defined]
+        if "output_dir" in config:
+            self._builder_output_dir._edit.setText(str(config["output_dir"]))  # type: ignore[attr-defined]
+        if "allow_empty_retrieval" in config:
+            self._builder_allow_empty_retrieval.setChecked(bool(config["allow_empty_retrieval"]))
+
     def _start_clicked(self) -> None:
         if self._process is not None:
             QMessageBox.warning(self, "Busy", "A task is already running.")
@@ -384,6 +436,8 @@ class TrainingGUI(QMainWindow):
 
         if current is self._clip_tab:
             module, command, config = self._build_clip_command()
+        elif current is self._builder_tab:
+            module, command, config = self._build_builder_command()
         else:
             module, command, config = self._build_labeler_command()
 
@@ -406,6 +460,8 @@ class TrainingGUI(QMainWindow):
 
         if module == "clip_extractor":
             self._save_module_config("clip_extractor", self._collect_clip_config())
+        if module == "dataset_builder":
+            self._save_module_config("dataset_builder", self._collect_builder_config())
         if module == "vlm_labeler":
             self._save_module_config("vlm_labeler", self._collect_labeler_config())
 
@@ -586,8 +642,43 @@ class TrainingGUI(QMainWindow):
         }
         return "vlm_labeler", cmd, config
 
+    def _build_builder_command(self) -> tuple[str, list[str] | None, dict[str, Any]]:
+        input_dir = self._get_path_value(self._builder_input_dir)
+        output_dir = self._get_path_value(self._builder_output_dir)
+        mode = self._builder_mode.currentText()
+        if not input_dir or not output_dir:
+            QMessageBox.warning(self, "Missing input", "input dir and output dir are required.")
+            return "dataset_builder", None, {}
+
+        if mode == "planner":
+            script = _repo_root() / "scripts" / "dataset_builder_planner.py"
+        else:
+            script = _repo_root() / "scripts" / "dataset_builder_controller.py"
+
+        cmd = [
+            sys.executable,
+            str(script),
+            "--input-dir",
+            input_dir,
+            "--output-dir",
+            output_dir,
+        ]
+        if self._builder_allow_empty_retrieval.isChecked():
+            cmd.append("--allow-empty-retrieval")
+
+        config = {
+            "module": "dataset_builder",
+            "mode": mode,
+            "input_dir": input_dir,
+            "output_dir": output_dir,
+            "allow_empty_retrieval": self._builder_allow_empty_retrieval.isChecked(),
+            "command": cmd,
+        }
+        return "dataset_builder", cmd, config
+
     def closeEvent(self, event) -> None:  # type: ignore[override]
         self._save_module_config("clip_extractor", self._collect_clip_config())
+        self._save_module_config("dataset_builder", self._collect_builder_config())
         self._save_module_config("vlm_labeler", self._collect_labeler_config())
         if not self._config_path("planner").exists():
             self._save_module_config("planner", {"module": "planner"})
