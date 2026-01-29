@@ -45,6 +45,8 @@ $RECYCLE.BIN/
 *.bak
 *.log
 *.trace
+__pycache__/
+*.py[cod]
 
 .env
 .env.local
