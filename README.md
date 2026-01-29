@@ -34,3 +34,8 @@ python3 scripts/vlm_labeler.py --input-dir out/ --backend ollama --base-url http
 python3 scripts/training_gui.py
 ```
 
+### Dataset Builder
+```bash
+python3 scripts/dataset_builder_planner.py --input-dir dataset/out --output-dir dataset/build
+python3 scripts/dataset_builder_controller.py --input-dir dataset/out --output-dir dataset/build
+```

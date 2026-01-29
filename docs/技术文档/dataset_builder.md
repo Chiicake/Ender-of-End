@@ -38,7 +38,7 @@ Dataset Builder 负责把采集数据与标注结果转换为可训练数据集�
 - `recent_clip` / `summary_clip`
 - `goal_t`（含 long_goal/mid_goal）
 - Labeler 输出 JSON 完整
-- `retrieved_memory`（若缺失需显式阻止构建或标注为缺省）
+- `retrieved_memory`（可缺失，缺失时标记为空 `{}`）
 
 ### Controller 必要字段
 - `image_t` 与 `action_t` 对齐长度一致
